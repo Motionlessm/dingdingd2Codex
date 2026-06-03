@@ -1,0 +1,55 @@
+{
+  "name": "history-repush",
+  "label": "History data repush",
+  "intent": "history_repush",
+  "aliases": ["history_repush", "atg_history_repush", "exception_to_atg_data_repush"],
+  "triggers": ["history data repush", "repush", "exception_to_atg_data", "pre_apasinfo"],
+  "created_message": "Created history data repush workflow",
+  "input_defaults": {
+    "case_ids": [],
+    "max_case_count": 5000,
+    "poll_interval_seconds": 300,
+    "max_wait_seconds": 21600
+  },
+  "stages": [
+    {
+      "name": "pre_apasinfo",
+      "label": "Submit and wait pre_apasinfo",
+      "executor": {
+        "type": "command",
+        "command": ["python", "executors/history_repush.py"],
+        "business_table": "pre_apasinfo",
+        "timeout_seconds": 30,
+        "poll_interval_seconds": 300,
+        "max_wait_seconds": 21600,
+        "max_case_count": 5000
+      }
+    },
+    {
+      "name": "pre_accept",
+      "label": "Submit and wait pre_accept",
+      "executor": {
+        "type": "command",
+        "command": ["python", "executors/history_repush.py"],
+        "business_table": "pre_accept",
+        "timeout_seconds": 30,
+        "poll_interval_seconds": 300,
+        "max_wait_seconds": 21600,
+        "max_case_count": 5000
+      }
+    },
+    {
+      "name": "pre_transact",
+      "label": "Submit and wait pre_transact",
+      "executor": {
+        "type": "command",
+        "command": ["python", "executors/history_repush.py"],
+        "business_table": "pre_transact",
+        "timeout_seconds": 30,
+        "poll_interval_seconds": 300,
+        "max_wait_seconds": 21600,
+        "max_case_count": 5000
+      }
+    }
+  ]
+}

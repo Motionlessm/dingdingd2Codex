@@ -1,0 +1,8 @@
+{
+  "name": "dingtalk.notify",
+  "label": "DingTalk notify",
+  "description": "Queue a workflow notification for the source DingTalk conversation and track cc-connect delivery acknowledgement.",
+  "type": "notify",
+  "risk": "low",
+  "requires_approval": false
+}

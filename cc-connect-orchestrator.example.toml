@@ -1,0 +1,24 @@
+# Minimal cc-connect project using the local Orchestrator agent.
+# Copy the relevant blocks into your cc-connect config.toml and fill DingTalk credentials.
+
+language = "zh-CN"
+
+[[projects]]
+name = "dingtalk-orchestrator"
+inject_sender = true
+
+[projects.agent]
+type = "orchestrator"
+
+[projects.agent.options]
+base_url = "http://127.0.0.1:8787"
+timeout_seconds = 30
+
+[[projects.platforms]]
+type = "dingtalk"
+
+[projects.platforms.options]
+# Fill from DingTalk robot / app settings.
+# cc-connect DingTalk uses Stream mode.
+client_id = "YOUR_DINGTALK_CLIENT_ID"
+client_secret = "YOUR_DINGTALK_CLIENT_SECRET"

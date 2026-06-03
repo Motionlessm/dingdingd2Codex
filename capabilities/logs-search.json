@@ -1,0 +1,41 @@
+{
+  "name": "logs-search",
+  "label": "日志查询",
+  "intent": "logs_search",
+  "aliases": ["logs_search"],
+  "triggers": ["查日志", "日志", "logs", "log", "error", "timeout"],
+  "created_message": "已创建日志查询任务",
+  "input_defaults": {
+    "service": "default-service",
+    "keyword": "",
+    "level": "error",
+    "minutes": 30,
+    "limit": 20
+  },
+  "stages": [
+    {
+      "name": "parse_query",
+      "label": "解析查询条件",
+      "executor": {
+        "type": "builtin",
+        "name": "logs_parse_query"
+      }
+    },
+    {
+      "name": "search_logs",
+      "label": "检索日志",
+      "executor": {
+        "type": "builtin",
+        "name": "logs_search"
+      }
+    },
+    {
+      "name": "summarize_logs",
+      "label": "生成摘要",
+      "executor": {
+        "type": "builtin",
+        "name": "logs_summarize"
+      }
+    }
+  ]
+}
