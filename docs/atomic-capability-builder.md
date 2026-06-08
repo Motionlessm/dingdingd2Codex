@@ -39,6 +39,38 @@ Invoke-RestMethod -Method GET -Uri "http://127.0.0.1:8787/api/capabilities"
 
 ## Generic Atomics
 
+## Atomic-Level Approval
+
+Atomic capabilities can require approval independently from workflow stages. Set the
+atomic registry file like this:
+
+```json
+{
+  "requires_approval": true,
+  "risk": "high"
+}
+```
+
+When a workflow invokes that atomic for the first time, the ToolGateway does not
+run the executor immediately. It records the invocation as `waiting_approval`
+and asks the WorkflowExecutor to create a DingTalk approval request.
+
+The approval is bound to:
+
+- workflow id
+- workflow stage
+- atomic capability name
+- SHA-256 hash of the atomic input payload
+
+After `/approve <approval_id>`, the workflow is resumed and the same stage is
+retried. The ToolGateway only executes the atomic when the approved input hash
+matches the current request. If the stage tries to call the same atomic with
+different input, it must be approved again.
+
+Use this for high-risk generic abilities such as database writes, destructive
+HTTP calls, log export, account operations, or retry submission. Low-risk
+read-only atomics can remain unapproved.
+
 ### `dingtalk.notify`
 
 Queues and delivers a short notification to the source DingTalk conversation.

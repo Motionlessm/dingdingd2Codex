@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -723,8 +724,30 @@ class ToolGateway:
             ),
         )
         try:
-            if row["requires_approval"]:
-                raise RuntimeError(f"atomic capability requires approval: {atomic_name}")
+            if row["requires_approval"] and not self.atomic_approval_granted(atomic_name, workflow, stage_name, input_data):
+                approval_config = dict(config)
+                approval_config["risk"] = row["risk"]
+                approval_payload = self.atomic_approval_payload(atomic_name, workflow, stage_name, input_data, approval_config)
+                result = {
+                    "status": "waiting_approval",
+                    "submitted_count": 0,
+                    "pending_count": 0,
+                    "success_count": 0,
+                    "failed_count": 0,
+                    "message": f"Approval required before invoking atomic capability {atomic_name}.",
+                    "approval_required": approval_payload,
+                }
+                finished = now_iso()
+                self.store.execute(
+                    """
+                    update atomic_invocations
+                    set status = 'waiting_approval', output_json = ?, finished_at = ?
+                    where id = ?
+                    """,
+                    (json.dumps(result, ensure_ascii=False), finished, invocation_id),
+                )
+                result.setdefault("atomic_invocation_id", invocation_id)
+                return result
             atomic_type = row["type"]
             if atomic_type == "notify":
                 result = self.invoke_notify_atomic(config, workflow, input_data)
@@ -773,6 +796,53 @@ class ToolGateway:
                 (str(exc), finished, invocation_id),
             )
             raise
+
+    def atomic_input_hash(self, atomic_name, workflow, stage_name, input_data):
+        payload = {
+            "atomic_name": atomic_name,
+            "workflow_id": workflow["id"],
+            "stage": stage_name,
+            "input": input_data,
+        }
+        encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    def atomic_approval_payload(self, atomic_name, workflow, stage_name, input_data, config):
+        input_hash = self.atomic_input_hash(atomic_name, workflow, stage_name, input_data)
+        return {
+            "stage": stage_name,
+            "workflow_id": workflow["id"],
+            "atomic": True,
+            "atomic_name": atomic_name,
+            "atomic_input_hash": input_hash,
+            "atomic_input": input_data,
+            "action": f"atomic:{atomic_name}",
+            "risk": config.get("risk") or "medium",
+            "reason": (
+                f"Atomic capability {atomic_name} requires approval before execution. "
+                f"Workflow={workflow['id']} stage={stage_name}."
+            ),
+        }
+
+    def atomic_approval_granted(self, atomic_name, workflow, stage_name, input_data):
+        input_hash = self.atomic_input_hash(atomic_name, workflow, stage_name, input_data)
+        rows = self.store.query_all(
+            """
+            select payload_json from approvals
+            where workflow_id = ? and action = ? and status = 'approved'
+            order by updated_at desc
+            limit 20
+            """,
+            (workflow["id"], f"atomic:{atomic_name}"),
+        )
+        for row in rows:
+            try:
+                payload = json.loads(row["payload_json"] or "{}")
+            except Exception:
+                continue
+            if payload.get("stage") == stage_name and payload.get("atomic_input_hash") == input_hash:
+                return True
+        return False
 
     def invoke_notify_atomic(self, config, workflow, input_data):
         message = input_data.get("message") or config.get("message")
@@ -1353,6 +1423,9 @@ class WorkflowExecutor(threading.Thread):
         result = self.execute_stage_with_audit(workflow, stage, stage_config, None)
         created = now_iso()
         status = result.get("status") or "succeeded"
+        if status == "waiting_approval" and result.get("approval_required"):
+            self.create_approval_from_result(workflow, stage, result)
+            return
         executor = stage_config.get("executor") or {}
         self.store.execute(
             """
@@ -1408,6 +1481,9 @@ class WorkflowExecutor(threading.Thread):
             raise ValueError(f"unsupported stage: {workflow['skill']}/{stage}")
         result = self.execute_stage_with_audit(workflow, stage, stage_config, stage_row)
         status = result.get("status") or "succeeded"
+        if status == "waiting_approval" and result.get("approval_required"):
+            self.create_approval_from_result(workflow, stage, result)
+            return result
         checked_at = now_iso()
         attempt_count = int(stage_row["attempt_count"] or 0) + 1
         next_check_at = self.next_check_at(result, stage_config, checked_at) if status == "running" else None
@@ -1645,6 +1721,47 @@ class WorkflowExecutor(threading.Thread):
     def stage_needs_demo_approval(self, workflow, stage):
         return False
 
+    def create_approval_from_result(self, workflow, stage, result):
+        request_payload = result.get("approval_required") or {}
+        action = request_payload.get("action") or "stage_approval"
+        duplicate = None
+        if request_payload.get("atomic_input_hash"):
+            rows = self.store.query_all(
+                """
+                select * from approvals
+                where workflow_id = ? and action = ? and status = 'pending'
+                order by created_at desc
+                limit 20
+                """,
+                (workflow["id"], action),
+            )
+            for row in rows:
+                try:
+                    payload = json.loads(row["payload_json"] or "{}")
+                except Exception:
+                    continue
+                if (
+                    payload.get("stage") == stage
+                    and payload.get("atomic_name") == request_payload.get("atomic_name")
+                    and payload.get("atomic_input_hash") == request_payload.get("atomic_input_hash")
+                ):
+                    duplicate = row
+                    break
+        if duplicate is not None:
+            self.store.execute(
+                "update workflows set status = 'waiting_approval', updated_at = ? where id = ?",
+                (now_iso(), workflow["id"]),
+            )
+            return duplicate["id"]
+        return self.create_approval(
+            workflow=workflow,
+            stage=stage,
+            action=action,
+            risk_level=request_payload.get("risk") or "medium",
+            reason=request_payload.get("reason") or result.get("message") or "Approval required.",
+            payload=request_payload,
+        )
+
     def create_approval(self, workflow, stage, action, risk_level, reason, payload):
         workflow_id = workflow["id"]
         approval_id = new_id("appr")
@@ -1698,6 +1815,7 @@ class WorkflowExecutor(threading.Thread):
             ),
             workflow_id,
         )
+        return approval_id
 
 
 class SimulatedConsumer(threading.Thread):

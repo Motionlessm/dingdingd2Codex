@@ -125,5 +125,6 @@ Invoke-RestMethod -Method POST -Uri "http://127.0.0.1:8787/api/messages" `
 
 - 新业务能力优先放到 `capabilities/*.json` 和 `executors/*`。
 - 可复用动作优先注册成 `atomics/*.json`，不要在业务 executor 里重复实现通知、数据库访问、日志查询等通用能力。
+- 高风险 atomic 可以设置 `requires_approval=true`，框架会在工具调用前通过钉钉创建审批；审批通过后，只允许执行同一个 workflow、stage、atomic 名称和输入哈希对应的那一次调用。
 - 长任务 executor 不要 `while + sleep` 等几小时；每次只执行一次提交或检查，返回 `running`、`next_check_seconds`、`max_wait_seconds` 交给 WorkflowExecutor 调度。
 - 数据库连接、Token、DSN 等敏感信息只从环境变量或本地私有配置读取。
