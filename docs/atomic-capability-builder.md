@@ -14,6 +14,36 @@ The atomic can invoke a controlled executor when code is needed. This keeps
 approval, audit, reload, and reuse in the framework instead of hiding those
 concerns inside one business script.
 
+## Discovery Before Implementation
+
+New capability work should start from a short business description, not a long
+framework prompt. The builder/skill should infer task type, known facts,
+defaults, and missing information first.
+
+Normal flow:
+
+1. User describes the business goal in plain language.
+2. Skill identifies task type, such as database write, log lookup, HTTP call,
+   long-running workflow, or notification.
+3. Skill asks only for critical gaps that cannot be safely inferred.
+4. Skill produces a plan for confirmation.
+5. Only after confirmation should files be written or registries reloaded.
+
+For database write and long-running workflows, common critical gaps are DSN
+environment variable, allowed table/columns, success/failure rule, polling
+interval, and max wait. Risky writes default to atomic approval.
+
+Example low-detail request:
+
+```text
+我要做历史数据重推，单号写 exception_to_atg_data，分 pre_apasinfo、pre_accept、pre_transact 三步，每步完成通知。
+```
+
+The expected first response is not file generation. It should identify the task
+as database write + long-running workflow + notification, list inferred stages
+and atomics, propose safe defaults, and ask only for critical missing data such
+as the DSN environment variable.
+
 ## Dry Run
 
 ```powershell

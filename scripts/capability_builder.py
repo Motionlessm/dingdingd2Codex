@@ -24,11 +24,18 @@ def extract_code_block(text):
 
 def extract_create_table_name(text):
     match = re.search(r"create\s+table\s+`?([A-Za-z0-9_]+)`?", text, flags=re.IGNORECASE)
-    return match.group(1) if match else ""
+    if match:
+        return match.group(1)
+    known = re.search(r"\b(exception_to_atg_data)\b", text, flags=re.IGNORECASE)
+    if known:
+        return known.group(1)
+    table_hint = re.search(r"(?:table|表)\s*[`'\"]?([A-Za-z][A-Za-z0-9_]{2,})[`'\"]?", text, flags=re.IGNORECASE)
+    return table_hint.group(1) if table_hint else ""
 
 
 def extract_stage_values(text):
     values = re.findall(r"'([A-Za-z0-9_]+)'", text)
+    values.extend(re.findall(r"\b(pre_[A-Za-z0-9_]+)\b", text))
     stages = []
     for value in values:
         if value.startswith("pre_") and value not in stages:
@@ -41,7 +48,15 @@ def infer_spec(description):
     stages = extract_stage_values(description) or ["submit", "check"]
     name_hint = "history-data-repush" if table == "exception_to_atg_data" else slugify(description[:80])
     capability_name = slugify(name_hint)
-    needs_mysql = bool(table or "mysql" in description.lower() or "table" in description.lower())
+    needs_mysql = bool(
+        table
+        or "mysql" in description.lower()
+        or "table" in description.lower()
+        or "数据库" in description
+        or "写入" in description
+        or "写" in description
+        or "表" in description
+    )
     needs_notify = "notify" in description.lower() or "钉钉" in description or "通知" in description
 
     atomics = []
@@ -61,6 +76,88 @@ def infer_spec(description):
         "needs_notify": needs_notify,
         "atomics": atomics,
         "source_sql": extract_code_block(description),
+    }
+
+
+def infer_task_types(spec, description):
+    text = description.lower()
+    types = []
+    if spec["needs_mysql"]:
+        types.append("database_write")
+    if spec["needs_notify"]:
+        types.append("notification")
+    if len(spec["stages"]) > 1 or "async" in text or "异步" in description or "完成后" in description:
+        types.append("long_running_workflow")
+    if "log" in text or "日志" in description:
+        types.append("log_lookup")
+    if "http" in text or "api" in text or "接口" in description:
+        types.append("http_api")
+    return types or ["workflow"]
+
+
+def infer_defaults(spec):
+    defaults = []
+    if spec["needs_mysql"]:
+        env_name = "RETRY_PUSH_DB_DSN" if spec["table"] == "exception_to_atg_data" else f"{spec['intent'].upper()}_DB_DSN"
+        defaults.append({"key": "dsn_env", "value": env_name, "reason": "database credentials must come from an environment variable"})
+        defaults.append(
+            {
+                "key": "approval",
+                "value": "submit atomics require requires_approval=true and risk=high",
+                "reason": "database writes are risky operations",
+            }
+        )
+        defaults.append(
+            {
+                "key": "completion_rule",
+                "value": "empty or pending means pending; fail/error/失败 means failed; other non-empty result means success",
+                "reason": "conservative default for asynchronous result fields",
+            }
+        )
+    defaults.append({"key": "poll_interval_seconds", "value": 300, "reason": "default long-task polling interval"})
+    defaults.append({"key": "max_wait_seconds", "value": 21600, "reason": "default long-task wait budget"})
+    return defaults
+
+
+def missing_questions(spec, description):
+    questions = []
+    lower = description.lower()
+    if spec["needs_mysql"]:
+        if "dsn" not in lower and "环境变量" not in description and "env" not in lower:
+            default_env = "RETRY_PUSH_DB_DSN" if spec["table"] == "exception_to_atg_data" else f"{spec['intent'].upper()}_DB_DSN"
+            questions.append(f"数据库连接环境变量名是否使用 {default_env}？")
+        if "result" not in lower and "完成" not in description and "失败" not in description:
+            questions.append("异步消费结果如何判断 pending/success/failed？")
+        if not spec["table"]:
+            questions.append("目标数据库表名是什么？")
+    if not spec["stages"]:
+        questions.append("业务阶段有哪些，按什么顺序执行？")
+    if "通知" not in description and "notify" not in lower and "dingtalk" not in lower:
+        questions.append("哪些节点需要发送钉钉通知？")
+    return questions[:5]
+
+
+def plan_summary(spec, description):
+    stages = []
+    for stage in spec["stages"]:
+        if spec["needs_mysql"]:
+            stages.append(f"submit_{stage} -> check_{stage}")
+            if spec["needs_notify"]:
+                stages.append(f"notify_{stage}")
+        else:
+            stages.append(stage)
+    return {
+        "task_types": infer_task_types(spec, description),
+        "inferred": {
+            "capability_name": spec["capability_name"],
+            "table": spec["table"],
+            "business_stages": spec["stages"],
+            "atomics": spec["atomics"],
+        },
+        "questions": missing_questions(spec, description),
+        "defaults": infer_defaults(spec),
+        "workflow_plan": stages,
+        "implementation_gate": "Confirm the plan before using --apply or editing project files.",
     }
 
 
@@ -286,7 +383,7 @@ def main():
 
     spec = infer_spec(description)
     files = build_files(spec)
-    output = {"spec": spec, "files": sorted(files)}
+    output = {"spec": spec, "plan": plan_summary(spec, description), "files": sorted(files)}
     print(json.dumps(output, ensure_ascii=False, indent=2))
 
     if args.apply:
