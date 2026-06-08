@@ -88,6 +88,24 @@ Invoke-RestMethod -Method POST -Uri "http://127.0.0.1:8787/api/admin/reload-capa
 Invoke-RestMethod -Method POST -Uri "http://127.0.0.1:8787/api/admin/reload-atomics"
 ```
 
+## 从自然语言生成能力草案
+
+先 dry-run 查看将生成哪些文件：
+
+```powershell
+python .\scripts\capability_builder.py --description "Create a workflow that reads MySQL order logs and sends DingTalk notification"
+```
+
+确认后写入项目：
+
+```powershell
+python .\scripts\capability_builder.py --file .\requirement.txt --apply
+```
+
+生成器会创建 capability、atomic 和 executor 草案。executor 默认是安全 stub，需要你把真实业务访问逻辑补进去。
+
+更多说明见 [docs/atomic-capability-builder.md](./docs/atomic-capability-builder.md)。
+
 ## 冒烟测试
 
 ```powershell

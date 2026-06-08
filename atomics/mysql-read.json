@@ -1,0 +1,16 @@
+{
+  "name": "mysql.read",
+  "label": "MySQL read query",
+  "description": "Run a controlled read-only MySQL query through an executor. SQL must be SELECT or WITH and tables must match the configured allowlist.",
+  "type": "command",
+  "risk": "medium",
+  "requires_approval": false,
+  "executor": {
+    "command": ["python", "executors/atomic_mysql.py"],
+    "timeout_seconds": 30
+  },
+  "dsn_env": "ATOMIC_MYSQL_DSN",
+  "readonly": true,
+  "allowed_tables": [],
+  "max_rows": 100
+}

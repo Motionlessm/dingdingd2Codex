@@ -1,0 +1,16 @@
+{
+  "name": "http.request",
+  "label": "Controlled HTTP request",
+  "description": "Run an allowlisted HTTP GET or POST request through an executor. Hosts must be configured explicitly in this atomic file or by ATOMIC_HTTP_ALLOWED_HOSTS.",
+  "type": "command",
+  "risk": "medium",
+  "requires_approval": false,
+  "executor": {
+    "command": ["python", "executors/atomic_http.py"],
+    "timeout_seconds": 30
+  },
+  "allowed_hosts": [],
+  "methods": ["GET", "POST"],
+  "timeout_seconds": 15,
+  "max_response_bytes": 20000
+}
