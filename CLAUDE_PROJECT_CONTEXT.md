@@ -1,11 +1,11 @@
-# Claude Project Context
+﻿# Claude Project Context
 
 This document is intended to be pasted into a new Claude/Codex session so the agent can work on this project without guessing the local architecture.
 
 ## Project Location
 
 ```text
-D:\dingtalk-claude-agent-architecture
+D:\dingdingd2Codex
 ```
 
 This is a local DingTalk Agent framework. DingTalk is the chat entrypoint, the planner interprets user intent, the workflow executor owns long-running state, and controlled executors perform actual database/log/API/script operations.
@@ -42,7 +42,7 @@ Example:
 ```powershell
 Invoke-RestMethod -Method POST -Uri "http://127.0.0.1:8787/api/messages" `
   -ContentType "application/json; charset=utf-8" `
-  -Body '{"conversation_id":"local-test","user_id":"u1","text":"查日志 payment error"}'
+  -Body '{"conversation_id":"local-test","user_id":"u1","text":"鏌ユ棩蹇?payment error"}'
 ```
 
 ## Important Files
@@ -71,7 +71,7 @@ There should be no hardcoded business workflow in `app.py` unless the framework 
 New business capabilities should be added as JSON files under:
 
 ```text
-D:\dingtalk-claude-agent-architecture\capabilities
+D:\dingdingd2Codex\capabilities
 ```
 
 Shape:
@@ -113,7 +113,7 @@ Invoke-RestMethod -Method GET -Uri "http://127.0.0.1:8787/api/capabilities"
 Reusable atomic abilities are registered under:
 
 ```text
-D:\dingtalk-claude-agent-architecture\atomics
+D:\dingdingd2Codex\atomics
 ```
 
 They are synced into SQLite table `atomic_capabilities`; every atomic call is audited in `atomic_invocations`.
@@ -132,7 +132,7 @@ Atomic file shape:
 ```json
 {
   "name": "dingtalk.notify",
-  "label": "钉钉通知",
+  "label": "閽夐拤閫氱煡",
   "description": "Send a workflow notification",
   "type": "notify",
   "risk": "low",
@@ -167,12 +167,25 @@ command     Run a registered command executor
 
 Use atomics for reusable internal abilities such as DingTalk notification, controlled MySQL operations, log lookup, HTTP calls, or approval helpers. Business workflow executors should not reimplement these concerns when an atomic ability exists.
 
+Business workflows should prefer `executor.type=atomic` for reusable or sensitive operations. A command executor can still exist, but it should usually be registered behind an atomic so the framework gets approval, audit, reload, and reuse through `atomic_invocations`.
+
+Risky or write-capable atomics should set:
+
+```json
+{
+  "requires_approval": true,
+  "risk": "high"
+}
+```
+
+Atomic approval is bound to the workflow id, stage, atomic name, and the hash of the atomic input payload. After `/approve <approval_id>`, the same stage is retried and only that approved atomic input is allowed to execute. If the input changes, a new approval is required.
+
 ## Command Executor Contract
 
 Command executors live under:
 
 ```text
-D:\dingtalk-claude-agent-architecture\executors
+D:\dingdingd2Codex\executors
 ```
 
 They receive JSON on stdin:
@@ -296,20 +309,27 @@ The planner sees registered capabilities via the capability registry and should 
 Compile changed Python:
 
 ```powershell
-python -m py_compile D:\dingtalk-claude-agent-architecture\app.py
+python -m py_compile D:\dingdingd2Codex\app.py
 ```
 
 Compile changed executors:
 
 ```powershell
-python -m py_compile D:\dingtalk-claude-agent-architecture\executors\<executor>.py
+python -m py_compile D:\dingdingd2Codex\executors\<executor>.py
 ```
 
 Run smoke test:
 
 ```powershell
-cd D:\dingtalk-claude-agent-architecture
+cd D:\dingdingd2Codex
 .\smoke-test.ps1
+```
+
+Run entrypoint integration test for registry reload, workflow creation, atomic approval, `/approve`, workflow resume, and notification queue:
+
+```powershell
+cd D:\dingdingd2Codex
+.\scripts\integration-entrypoint-test.ps1
 ```
 
 Check dashboard:
@@ -317,3 +337,4 @@ Check dashboard:
 ```text
 http://127.0.0.1:8787/dashboard
 ```
+

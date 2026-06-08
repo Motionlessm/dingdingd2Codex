@@ -9,6 +9,11 @@
 
 It is intentionally conservative. Generated executors are stubs until a developer fills in the controlled business operation.
 
+For reusable or sensitive actions, generated workflows should call `executor.type=atomic`.
+The atomic can invoke a controlled executor when code is needed. This keeps
+approval, audit, reload, and reuse in the framework instead of hiding those
+concerns inside one business script.
+
 ## Dry Run
 
 ```powershell
@@ -35,6 +40,12 @@ The script refuses to overwrite existing generated files.
 python -m py_compile .\app.py .\executors\*.py
 Invoke-RestMethod -Method POST -Uri "http://127.0.0.1:8787/api/admin/reload-capabilities"
 Invoke-RestMethod -Method GET -Uri "http://127.0.0.1:8787/api/capabilities"
+```
+
+For framework-level changes, run the entrypoint integration test:
+
+```powershell
+.\scripts\integration-entrypoint-test.ps1
 ```
 
 ## Generic Atomics

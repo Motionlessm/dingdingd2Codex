@@ -113,6 +113,13 @@ cd D:\dingdingd2Codex
 .\smoke-test.ps1
 ```
 
+框架级入口集成测试（覆盖热加载、`/api/messages`、atomic 审批、`/approve`、恢复执行和通知队列）：
+
+```powershell
+cd D:\dingdingd2Codex
+.\scripts\integration-entrypoint-test.ps1
+```
+
 或手动从入口发送消息：
 
 ```powershell

@@ -13,6 +13,10 @@ def slugify(text):
     return text or "generated-capability"
 
 
+def stage_key(text):
+    return re.sub(r"[^A-Za-z0-9_]+", "_", str(text).strip()).strip("_") or "stage"
+
+
 def extract_code_block(text):
     match = re.search(r"```(?:sql)?\s*(.*?)```", text, flags=re.IGNORECASE | re.DOTALL)
     return match.group(1).strip() if match else ""
@@ -75,32 +79,90 @@ def capability_json(spec):
             }
         )
     for stage in spec["stages"]:
+        key = stage_key(stage)
+        if spec["needs_mysql"]:
+            stages.append(
+                {
+                    "name": f"submit_{key}",
+                    "label": f"Submit {stage}",
+                    "executor": {
+                        "type": "atomic",
+                        "name": f"{spec['capability_name']}.submit",
+                        "input": {
+                            "operation": "submit",
+                            "business_stage": stage,
+                            "table": spec["table"],
+                            "items": "$payload.items",
+                            "case_ids": "$payload.case_ids",
+                            "batch_size": "$payload.batch_size",
+                            "poll_interval_seconds": "$payload.poll_interval_seconds",
+                            "max_wait_seconds": "$payload.max_wait_seconds",
+                        },
+                    },
+                }
+            )
+            stages.append(
+                {
+                    "name": f"check_{key}",
+                    "label": f"Check {stage}",
+                    "executor": {
+                        "type": "atomic",
+                        "name": f"{spec['capability_name']}.check",
+                        "input": {
+                            "operation": "check",
+                            "business_stage": stage,
+                            "table": spec["table"],
+                            "items": "$payload.items",
+                            "case_ids": "$payload.case_ids",
+                            "poll_interval_seconds": "$payload.poll_interval_seconds",
+                            "max_wait_seconds": "$payload.max_wait_seconds",
+                        },
+                    },
+                    "poll_interval_seconds": 300,
+                    "max_wait_seconds": 21600,
+                }
+            )
+        else:
+            stages.append(
+                {
+                    "name": key,
+                    "label": f"Run {stage}",
+                    "executor": {
+                        "type": "command",
+                        "command": ["python", f"executors/{spec['capability_name'].replace('-', '_')}.py"],
+                        "stage_name": stage,
+                        "timeout_seconds": 30,
+                        "poll_interval_seconds": 300,
+                        "max_wait_seconds": 21600,
+                    },
+                }
+            )
+        if spec["needs_notify"]:
+            stages.append(
+                {
+                    "name": f"notify_{key}",
+                    "label": f"Notify {stage}",
+                    "executor": {
+                        "type": "atomic",
+                        "name": "dingtalk.notify",
+                        "input": {"message": f"Workflow {{workflow_id}} completed business stage {stage}"},
+                    },
+                }
+            )
+    if not spec["needs_mysql"] and not spec["stages"]:
         stages.append(
             {
-                "name": stage,
-                "label": f"Run {stage}",
+                "name": "run",
+                "label": "Run",
                 "executor": {
                     "type": "command",
                     "command": ["python", f"executors/{spec['capability_name'].replace('-', '_')}.py"],
-                    "stage_name": stage,
                     "timeout_seconds": 30,
                     "poll_interval_seconds": 300,
                     "max_wait_seconds": 21600,
                 },
             }
         )
-        if spec["needs_notify"]:
-            stages.append(
-                {
-                    "name": f"notify_{stage}",
-                    "label": f"Notify {stage}",
-                    "executor": {
-                        "type": "atomic",
-                        "name": "dingtalk.notify",
-                        "input": {"message": f"Workflow {{workflow_id}} completed stage {stage}"},
-                    },
-                }
-            )
     return {
         "name": spec["capability_name"],
         "label": spec["label"],
@@ -108,7 +170,7 @@ def capability_json(spec):
         "aliases": [spec["intent"]],
         "triggers": [spec["capability_name"], spec["label"].lower()],
         "created_message": f"Created {spec['label']} workflow",
-        "input_defaults": {"items": [], "poll_interval_seconds": 300, "max_wait_seconds": 21600},
+        "input_defaults": {"items": [], "case_ids": [], "batch_size": 2000, "poll_interval_seconds": 300, "max_wait_seconds": 21600},
         "stages": stages,
     }
 
@@ -137,8 +199,13 @@ def main():
     request = json.loads(sys.stdin.read() or "{{}}")
     stage = request.get("stage") or ""
     payload = request.get("payload") or {{}}
-    if stage not in ALLOWED_STAGES:
-        return fail(f"unsupported stage: {{stage}}")
+    atomic_input = request.get("atomic_input") or {{}}
+    business_stage = atomic_input.get("business_stage") or stage
+    operation = atomic_input.get("operation") or "run"
+    if business_stage not in ALLOWED_STAGES:
+        return fail(f"unsupported business stage: {{business_stage}}")
+    if operation not in {{"submit", "check", "run"}}:
+        return fail(f"unsupported operation: {{operation}}")
 
     # TODO: replace this stub with a controlled submit/check implementation.
     # Keep each invocation short. Return running with next_check_seconds when
